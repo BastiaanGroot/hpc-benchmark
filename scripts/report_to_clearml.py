@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """
-Report benchmark results to ClearML.
+Report benchmark results to ClearML using agile-clearml.
 
-Reads all JSON result files from a results directory and creates a single
-ClearML task per benchmark run with:
-  - Scalar metrics (steps/s, samples/s, GB/s, MFU, etc.)
-  - Hyperparameters (world_size, batch_size, gpu, config, …)
-  - A comparison table as a ClearML Table artifact
+Reads all JSON result files from a results directory and creates a ClearML
+task per benchmark type with scalar metrics, hyperparameters, and a summary table.
 
 Usage:
   python scripts/report_to_clearml.py \
       --results-dir results/ \
       --project "HPC Benchmarks" \
-      --cluster-name "aws-p5-us-east-1"
+      --cluster-name "nebius-b300"
 
 Requirements:
-  pip install clearml
+  pip install agile-clearml \
+      --index-url https://artifactory.agile-robots.com/artifactory/api/pypi/MU-AR_PYPI_STAGING/simple
 
-Configure ClearML credentials once with:
-  clearml-init
-or set CLEARML_API_HOST / CLEARML_API_ACCESS_KEY / CLEARML_API_SECRET_KEY env vars.
+Credentials (env vars):
+  CLEARML_OTC_API_ACCESS_KEY
+  CLEARML_OTC_API_SECRET_KEY
 """
 import argparse
 import json
@@ -29,19 +27,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Result file → benchmark type mapping
+# Benchmark schema: filename prefix → (task_name, metric_keys, param_keys)
 # ---------------------------------------------------------------------------
-
-# Maps filename prefix → (clearml_task_name, metric_keys, param_keys)
 _BENCHMARK_SCHEMAS = {
     "hpl_": (
         "HPL (Linpack)",
         {"tflops": "TFLOPS"},
-        ["nodes"],
-    ),
-    "hpcg_": (
-        "HPCG",
-        {"gflops": "GFLOPS", "bandwidth_gb_s": "Bandwidth GB/s"},
         ["nodes"],
     ),
     "nccl_": (
@@ -55,7 +46,7 @@ _BENCHMARK_SCHEMAS = {
         ["model", "num_accelerators", "batch_size"],
     ),
     "lerobot_": (
-        "LeRobot I/O",
+        "LeRobot I/O (LIBERO)",
         {
             "samples_per_sec": "Samples/s",
             "throughput_mb_s": "Throughput MB/s",
@@ -65,7 +56,7 @@ _BENCHMARK_SCHEMAS = {
         ["workers"],
     ),
     "pi05_1n": (
-        "π₀.₅ Training (1 node)",
+        "π₀.₅ Training (1 node × 8 GPU)",
         {
             "steps_per_sec": "Steps/s",
             "samples_per_sec": "Samples/s",
@@ -75,7 +66,7 @@ _BENCHMARK_SCHEMAS = {
         ["world_size", "per_gpu_batch_size", "global_batch_size", "gpu_name"],
     ),
     "pi05_2n": (
-        "π₀.₅ Training (2 nodes)",
+        "π₀.₅ Training (2 nodes × 8 GPU)",
         {
             "steps_per_sec": "Steps/s",
             "samples_per_sec": "Samples/s",
@@ -118,46 +109,39 @@ def _load_results(results_dir: Path) -> list[dict]:
     return rows
 
 
-def _report_to_clearml(rows: list[dict], project: str, cluster_name: str):
+def _report(rows: list[dict], project: str, cluster_name: str):
     try:
-        from clearml import Task
+        from agile_clearml import ClearMLClient, ClearMLConfig
     except ImportError:
         raise SystemExit(
-            "clearml not installed. Run: pip install clearml\n"
-            "Then configure credentials with: clearml-init"
+            "agile-clearml not installed.\n"
+            "pip install agile-clearml "
+            "--index-url https://artifactory.agile-robots.com/artifactory/api/pypi/MU-AR_PYPI_STAGING/simple"
         )
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    # Group rows by benchmark type
     by_bench: dict[str, list] = {}
     for row in rows:
-        task_name = row["schema"][0]
-        by_bench.setdefault(task_name, []).append(row)
+        by_bench.setdefault(row["schema"][0], []).append(row)
 
-    created_tasks = []
-
+    created = []
     for bench_name, bench_rows in by_bench.items():
-        task = Task.init(
+        cfg = ClearMLConfig(
             project_name=project,
             task_name=f"{bench_name} — {cluster_name} — {timestamp}",
-            task_type=Task.TaskTypes.custom,
-            auto_connect_frameworks=False,
-            reuse_last_task_id=False,
         )
-        task.set_parameter("cluster_name", cluster_name)
-        task.set_parameter("benchmark", bench_name)
-        task.set_parameter("host", socket.gethostname())
-        task.set_parameter("reported_at", timestamp)
+        client = ClearMLClient().initialize_task(cfg)
+        task = client.task
 
-        logger = task.get_logger()
+        task.set_parameter("cluster_name", cluster_name)
+        task.set_parameter("host", socket.gethostname())
+
         _, metric_keys, param_keys = bench_rows[0]["schema"]
+        logger = task.get_logger()
 
         for idx, row in enumerate(bench_rows):
             data = row["data"]
             series = row["file"]
-
-            # Log scalar metrics
             for json_key, display_name in metric_keys.items():
                 val = data.get(json_key)
                 if val is not None:
@@ -167,22 +151,17 @@ def _report_to_clearml(rows: list[dict], project: str, cluster_name: str):
                         value=float(val),
                         iteration=idx,
                     )
-
-            # Log hyperparameters from first result file
             if idx == 0:
                 for pk in param_keys:
                     if pk in data:
                         task.set_parameter(pk, data[pk])
 
-        # Upload a comparison table if multiple files
         if len(bench_rows) > 1:
             cols = ["file"] + list(metric_keys.keys())
-            table = [cols]
-            for row in bench_rows:
-                table.append(
-                    [row["file"]]
-                    + [row["data"].get(k, "—") for k in metric_keys.keys()]
-                )
+            table = [cols] + [
+                [r["file"]] + [r["data"].get(k, "—") for k in metric_keys]
+                for r in bench_rows
+            ]
             logger.report_table(
                 title=f"{bench_name} Summary",
                 series="comparison",
@@ -191,20 +170,18 @@ def _report_to_clearml(rows: list[dict], project: str, cluster_name: str):
             )
 
         task.close()
-        created_tasks.append(task.id)
+        created.append(task.id)
         print(f"  Created task: {bench_name}  (id={task.id})")
 
-    return created_tasks
+    return created
 
 
 def _print_summary(rows: list[dict], cluster_name: str):
-    """Print a human-readable comparison table to stdout."""
     print(f"\n{'='*70}")
-    print(f"  Benchmark Results — {cluster_name}")
+    print(f"  Results — {cluster_name}")
     print(f"{'='*70}")
     for row in rows:
-        bench_name = row["schema"][0]
-        metric_keys = row["schema"][1]
+        bench_name, metric_keys, _ = row["schema"]
         data = row["data"]
         metrics_str = "  ".join(
             f"{label}: {data.get(jk, '—')}"
@@ -217,24 +194,18 @@ def _print_summary(rows: list[dict], cluster_name: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Report benchmark results to ClearML")
-    parser.add_argument("--results-dir", default="results",
-                        help="Directory containing JSON result files (default: results/)")
-    parser.add_argument("--project", default="HPC Benchmarks",
-                        help="ClearML project name (default: 'HPC Benchmarks')")
-    parser.add_argument("--cluster-name", default=socket.gethostname(),
-                        help="Human-readable cluster identifier (e.g. aws-p5-us-east-1)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print summary only, do not upload to ClearML")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--results-dir", default="results")
+    parser.add_argument("--project", default="HPC Benchmarks")
+    parser.add_argument("--cluster-name", default=socket.gethostname())
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
     if not results_dir.exists():
         raise SystemExit(f"Results directory not found: {results_dir}")
 
-    print(f"Loading results from {results_dir} ...")
     rows = _load_results(results_dir)
-
     if not rows:
         raise SystemExit("No recognised JSON result files found.")
 
@@ -242,12 +213,11 @@ def main():
     _print_summary(rows, args.cluster_name)
 
     if args.dry_run:
-        print("(dry-run mode — not uploading to ClearML)")
+        print("(dry-run — not uploading to ClearML)")
         return
 
     print(f"Uploading to ClearML project '{args.project}' ...")
-    task_ids = _report_to_clearml(rows, args.project, args.cluster_name)
-    print(f"\nDone. Created {len(task_ids)} ClearML task(s).")
+    _report(rows, args.project, args.cluster_name)
 
 
 if __name__ == "__main__":

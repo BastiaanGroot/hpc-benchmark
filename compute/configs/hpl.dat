@@ -3,13 +3,13 @@ Innovative Computing Laboratory, University of Tennessee
 HPL.out      output file name (if any)
 6            device out (6=stdout,7=stderr,file)
 1            # of problems sizes (N)
-90000        Ns  (increase for more memory: N ≈ sqrt(0.8 * mem_bytes / 8))
+460000       Ns  (B300 8×275GB: N=sqrt(0.8*2.2e12/8)≈469k; A100 8×80GB→N≈200k; H100 8×80GB→N≈200k)
 1            # of NBs
-336          NBs (tuned for A100/H100; try 192-512)
+512          NBs (Blackwell B300: 512; H100/H200: 336; A100: 336)
 0            PMAP process mapping (0=Row-,1=Column-major)
 1            # of process grids (P x Q)
-4            Ps  (set P*Q = total MPI ranks; prefer P <= Q)
-8            Qs
+2            Ps  (set P*Q = total MPI ranks; prefer P <= Q)
+4            Qs
 16.0         threshold
 3            # of panel fact
 0 1 2        PFACTs (0=left, 1=Crout, 2=Right)
