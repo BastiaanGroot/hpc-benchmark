@@ -4,7 +4,7 @@
 #SBATCH --error=results/lerobot_io_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=${CPUS_PER_TASK:-16}
+#SBATCH --cpus-per-task=16
 #SBATCH --time=01:00:00
 
 # LeRobot I/O Benchmark — LIBERO Parquet + MP4 read throughput

@@ -2,7 +2,7 @@
 #SBATCH --job-name=pi05-ckpt-bench
 #SBATCH --output=results/pi05_ckpt_%j.out
 #SBATCH --error=results/pi05_ckpt_%j.err
-#SBATCH --nodes=${NODES:-1}
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=8
 #SBATCH --cpus-per-task=16

@@ -4,7 +4,7 @@
 #SBATCH --error=results/mlperf_storage_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=${CPUS_PER_TASK:-32}
+#SBATCH --cpus-per-task=32
 #SBATCH --time=04:00:00
 
 # MLPerf Storage v2.0 — industry-standard ML storage benchmark
