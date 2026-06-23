@@ -21,9 +21,10 @@
 #   HPL_DAT     : path to HPL.dat (default: compute/configs/hpl.dat)
 
 set -euo pipefail
+BENCH_DIR="${BENCH_DIR:-${HOME}/git/hpc-benchmark}"
 
 NGC_IMAGE="${NGC_IMAGE:-nvcr.io/nvidia/hpc-benchmarks:26.02}"
-HPL_DAT="${HPL_DAT:-$(cd "$(dirname "$0")" && pwd)/configs/hpl.dat}"
+HPL_DAT="${HPL_DAT:-$(cd "${BENCH_DIR}" && pwd)/configs/hpl.dat}"
 RESULTS_DIR="${RESULTS_DIR:-results}"
 SCRATCH="/tmp/hpl-${SLURM_JOB_ID}"
 

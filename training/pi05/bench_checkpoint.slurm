@@ -24,6 +24,7 @@
 #   N_ROUNDS       : save/load rounds to average, default 3
 
 set -euo pipefail
+BENCH_DIR="${BENCH_DIR:-${HOME}/git/hpc-benchmark}"
 
 OPENPI_DIR="${OPENPI_DIR:-${HOME}/openpi}"
 STORAGE_PATH="${STORAGE_PATH:?Set STORAGE_PATH to the filesystem mount under test}"
@@ -57,7 +58,7 @@ srun torchrun \
   --master-addr="${MASTER_ADDR}" \
   --master-port="${MASTER_PORT}" \
   --node-rank="${SLURM_NODEID}" \
-  "$(dirname "$0")/bench_checkpoint.py" \
+  "${BENCH_DIR}/bench_checkpoint.py" \
     --checkpoint-dir "${CKPT_DIR}" \
     --n-rounds "${N_ROUNDS}" \
     --json-out "${RESULTS_DIR}/pi05_ckpt_${SLURM_NNODES}n_${SLURM_JOB_ID}.json"

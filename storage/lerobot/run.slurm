@@ -25,6 +25,7 @@
 #   N_BATCHES     : number of batches to measure (default 500)
 
 set -euo pipefail
+BENCH_DIR="${BENCH_DIR:-${HOME}/git/hpc-benchmark}"
 
 STORAGE_PATH="${STORAGE_PATH:?Set STORAGE_PATH to the filesystem mount under test}"
 DATASET_DIR="${DATASET_DIR:-${STORAGE_PATH}/lerobot-datasets/physical-intelligence--libero}"
@@ -39,7 +40,7 @@ if [[ ! -f "${VENV}/bin/activate" ]]; then
   python3 -m venv "${VENV}"
   source "${VENV}/bin/activate"
   pip install --quiet --upgrade pip
-  pip install --quiet -r "$(dirname "$0")/requirements.txt"
+  pip install --quiet -r "${BENCH_DIR}/requirements.txt"
   pip install --quiet huggingface_hub
 else
   source "${VENV}/bin/activate"
@@ -56,7 +57,7 @@ echo "Started:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [[ ! -d "${DATASET_DIR}" ]]; then
   echo ""
   echo "--- Downloading physical-intelligence/libero (~35 GB) ---"
-  python3 "$(dirname "$0")/download_dataset.py" \
+  python3 "${BENCH_DIR}/download_dataset.py" \
     --dest "${STORAGE_PATH}/lerobot-datasets" \
     --dataset "physical-intelligence/libero" \
     ${HF_TOKEN:+--hf-token "${HF_TOKEN}"}
@@ -68,7 +69,7 @@ fi
 
 echo ""
 echo "--- Running I/O benchmark ---"
-python3 "$(dirname "$0")/bench_lerobot.py" \
+python3 "${BENCH_DIR}/bench_lerobot.py" \
   "${DATASET_DIR}" \
   --workers "${WORKERS}" \
   --n-batches "${N_BATCHES}" \

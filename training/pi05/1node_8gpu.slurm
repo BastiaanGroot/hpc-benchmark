@@ -24,6 +24,7 @@
 #   HF_TOKEN        : HuggingFace token for downloading lerobot/pi05_base weights
 
 set -euo pipefail
+BENCH_DIR="${BENCH_DIR:-${HOME}/git/hpc-benchmark}"
 
 OPENPI_DIR="${OPENPI_DIR:-${HOME}/openpi}"
 STORAGE_PATH="${STORAGE_PATH:?Set STORAGE_PATH to the filesystem mount under test}"
@@ -61,7 +62,7 @@ torchrun \
   --nproc-per-node=8 \
   --master-addr="${MASTER_ADDR}" \
   --master-port="${MASTER_PORT}" \
-  "$(dirname "$0")/bench_train.py" \
+  "${BENCH_DIR}/bench_train.py" \
     --config pi05_base \
     --data-dir "${DATASET_DIR}" \
     --batch-size "${BATCH_SIZE}" \
