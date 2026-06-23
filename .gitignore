@@ -1,0 +1,8 @@
+results/
+*.out
+*.err
+__pycache__/
+*.pyc
+.venv/
+*.sif
+*.sqsh
