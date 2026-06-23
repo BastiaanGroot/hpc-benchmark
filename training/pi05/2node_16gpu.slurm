@@ -83,7 +83,7 @@ srun torchrun \
   --master-addr="${MASTER_ADDR}" \
   --master-port="${MASTER_PORT}" \
   --node-rank="${SLURM_NODEID}" \
-  "${BENCH_DIR}/bench_train.py" \
+  "${BENCH_DIR}/training/pi05/bench_train.py" \
     --config pi05_base \
     --data-dir "${DATASET_DIR}" \
     --batch-size "${BATCH_SIZE}" \

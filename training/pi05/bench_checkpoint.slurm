@@ -58,7 +58,7 @@ srun torchrun \
   --master-addr="${MASTER_ADDR}" \
   --master-port="${MASTER_PORT}" \
   --node-rank="${SLURM_NODEID}" \
-  "${BENCH_DIR}/bench_checkpoint.py" \
+  "${BENCH_DIR}/training/pi05/bench_checkpoint.py" \
     --checkpoint-dir "${CKPT_DIR}" \
     --n-rounds "${N_ROUNDS}" \
     --json-out "${RESULTS_DIR}/pi05_ckpt_${SLURM_NNODES}n_${SLURM_JOB_ID}.json"

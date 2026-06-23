@@ -62,7 +62,7 @@ torchrun \
   --nproc-per-node=8 \
   --master-addr="${MASTER_ADDR}" \
   --master-port="${MASTER_PORT}" \
-  "${BENCH_DIR}/bench_train.py" \
+  "${BENCH_DIR}/training/pi05/bench_train.py" \
     --config pi05_base \
     --data-dir "${DATASET_DIR}" \
     --batch-size "${BATCH_SIZE}" \
