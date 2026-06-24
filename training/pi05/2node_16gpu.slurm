@@ -80,9 +80,9 @@ export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 srun torchrun \
   --nnodes=2 \
   --nproc-per-node=8 \
-  --master-addr="${MASTER_ADDR}" \
-  --master-port="${MASTER_PORT}" \
-  --node-rank="${SLURM_NODEID}" \
+  --rdzv-backend=c10d \
+  --rdzv-endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
+  --rdzv-id="${SLURM_JOB_ID}" \
   "${BENCH_DIR}/training/pi05/bench_train.py" \
     --config pi05_base \
     --data-dir "${DATASET_DIR}" \
