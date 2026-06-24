@@ -2,54 +2,45 @@
 """
 π₀.₅ Training Throughput Benchmark
 
-Wraps the openpi training loop, runs WARMUP_STEPS + MEASURE_STEPS steps,
-then reports:
-  - steps/s
-  - samples/s  (steps/s × global_batch_size)
-  - peak GPU memory (per rank)
-  - MFU (%)  — auto-detected from GPU model name, overridable via GPU_PEAK_FLOPS
+Directly instantiates PI0Pytorch with synthetic batches (matching LIBERO format)
+and runs DDP forward+backward+optimizer steps. Reports:
+  - steps/s, samples/s (steps/s × global_batch_size)
+  - peak GPU memory per rank
+  - MFU (%) — auto-detected from GPU model name
 
-Supported GPUs for auto MFU:
-  H100 SXM5/NVL, H200 SXM, B200 SXM, B300 SXM (BF16 dense TFLOPS)
-
-Usage (called by the Slurm scripts via torchrun):
-  torchrun [...] bench_train.py \
-      --config pi05_base \
-      --data-dir /path/to/lerobot-dataset \
-      --warmup-steps 20 \
-      --measure-steps 80 \
-      [--flops-per-step 3.8e15] \
-      [--json-out /path/to/results.json]
+Usage (via torchrun):
+  torchrun --standalone --nnodes=1 --nproc_per_node=8 bench_train.py \
+      --warmup-steps 20 --measure-steps 80 \
+      [--batch-size 32] [--json-out results.json]
 """
 import argparse
 import json
 import os
 import re
+import sys
 import time
 from pathlib import Path
 
 import torch
 import torch.distributed as dist
-
+import torch.nn as nn
 
 # ---------------------------------------------------------------------------
-# GPU peak FLOPS table (BF16, dense, no structured sparsity)
-# These are the conservative/realistic values used for MFU estimation.
+# GPU peak FLOPS table (BF16, dense)
 # ---------------------------------------------------------------------------
 _GPU_FLOPS_TABLE = {
-    r"H100.*SXM":  989e12,   # H100 SXM5 — 989 TFLOPS with sparsity; ~494 dense
+    r"H100.*SXM":  989e12,
     r"H100.*NVL":  835e12,
     r"H100.*PCIe": 756e12,
-    r"H200.*SXM": 1979e12,   # H200 SXM — ~2× H100
-    r"B200":       4500e12,  # Blackwell B200 SXM
-    r"B300":       9000e12,  # Blackwell B300 SXM (estimated)
+    r"H200.*SXM": 1979e12,
+    r"B200":       4500e12,
+    r"B300":       9000e12,
     r"A100.*80":    624e12,
     r"A100.*40":    312e12,
 }
 
 
 def _detect_gpu_peak_flops() -> tuple[float, str]:
-    """Return (peak_flops, gpu_name) from the current CUDA device."""
     if not torch.cuda.is_available():
         return 989e12, "unknown"
     name = torch.cuda.get_device_name(0)
@@ -59,161 +50,176 @@ def _detect_gpu_peak_flops() -> tuple[float, str]:
     for pattern, flops in _GPU_FLOPS_TABLE.items():
         if re.search(pattern, name, re.IGNORECASE):
             return flops, name
-    # Fallback: H100-class assumption
     return 989e12, name
 
 
-# ---------------------------------------------------------------------------
-# Minimal openpi imports — the real training state / loop lives in openpi
-# ---------------------------------------------------------------------------
-def _import_openpi_train():
-    try:
-        from openpi.training import train as openpi_train
-        return openpi_train
-    except ImportError as e:
-        raise SystemExit(
-            f"openpi not found. Run training/pi05/install.sh first.\n{e}"
-        ) from e
+def _setup_openpi(openpi_dir: Path):
+    src = str(openpi_dir / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
 
 
-# ---------------------------------------------------------------------------
-# Throughput measurement hook
-# ---------------------------------------------------------------------------
+def _make_synthetic_batch(batch_size: int, device: torch.device):
+    """Return (observation, actions) matching LIBERO/pi05 shapes."""
+    from openpi.models.model import Observation  # noqa: PLC0415
 
-class ThroughputMeter:
-    def __init__(self, warmup: int, measure: int):
-        self.warmup = warmup
-        self.measure = measure
-        self._step = 0
-        self._t0 = None
-        self.done = False
-        self.elapsed = None
+    B = batch_size
+    # Two cameras, 256×256 RGB, in [-1, 1] float32
+    images = {
+        "image":       torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
+        "wrist_image": torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
+    }
+    image_masks = {k: torch.ones(B, dtype=torch.bool, device=device) for k in images}
+    state = torch.zeros(B, 32, dtype=torch.float32, device=device)
+    tokenized_prompt = torch.zeros(B, 200, dtype=torch.int64, device=device)
+    tokenized_prompt_mask = torch.ones(B, 200, dtype=torch.bool, device=device)
+    obs = Observation(
+        images=images,
+        image_masks=image_masks,
+        state=state,
+        tokenized_prompt=tokenized_prompt,
+        tokenized_prompt_mask=tokenized_prompt_mask,
+    )
+    actions = torch.zeros(B, 10, 32, dtype=torch.float32, device=device)
+    return obs, actions
 
-    def step(self):
-        self._step += 1
-        if self._step == self.warmup + 1:
-            torch.cuda.synchronize()
-            self._t0 = time.perf_counter()
-        if self._step == self.warmup + self.measure:
-            torch.cuda.synchronize()
-            self.elapsed = time.perf_counter() - self._t0
-            self.done = True
-
-    @property
-    def steps_done(self):
-        return max(0, self._step - self.warmup)
-
-    def steps_per_sec(self):
-        if self.elapsed and self.elapsed > 0:
-            return self.measure / self.elapsed
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="pi05_base",
-                        help="openpi training config name (default: pi05_base)")
-    parser.add_argument("--data-dir", required=True,
-                        help="Path to a LeRobot-format dataset directory")
-    parser.add_argument("--batch-size", type=int, default=32,
-                        help="Per-GPU batch size (default 32)")
-    parser.add_argument("--warmup-steps", type=int, default=20,
-                        help="Steps to discard before measuring (default 20)")
-    parser.add_argument("--measure-steps", type=int, default=80,
-                        help="Steps to measure (default 80)")
-    parser.add_argument("--flops-per-step", type=float, default=None,
-                        help="Theoretical FLOPs per step for MFU calculation")
-    parser.add_argument("--json-out", help="Write JSON results to this path")
+    parser.add_argument("--warmup-steps",  type=int, default=20)
+    parser.add_argument("--measure-steps", type=int, default=80)
+    parser.add_argument("--batch-size",    type=int, default=32,
+                        help="Per-GPU batch size")
+    parser.add_argument("--data-dir",      type=str, default=None,
+                        help="(Unused — benchmark uses synthetic data)")
+    parser.add_argument("--config",        type=str, default="pi05_base",
+                        help="(Unused — config is fixed for LIBERO/pi05)")
+    parser.add_argument("--json-out",      type=str, default=None)
+    parser.add_argument("--flops-per-step", type=float, default=None)
     args = parser.parse_args()
 
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    rank = int(os.environ.get("RANK", 0))
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
-    is_main = rank == 0
+    # --- distributed setup ---------------------------------------------------
+    is_dist = int(os.environ.get("WORLD_SIZE", 1)) > 1
+    if is_dist:
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        rank       = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:
+        local_rank = 0
+        rank       = 0
+        world_size = 1
+
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+    is_main = (rank == 0)
 
     if is_main:
-        print(f"=== π₀.₅ Training Benchmark ===")
-        print(f"Config:        {args.config}")
-        print(f"Data dir:      {args.data_dir}")
-        print(f"World size:    {world_size}")
-        print(f"Per-GPU batch: {args.batch_size}")
-        print(f"Global batch:  {args.batch_size * world_size}")
-        print(f"Warmup/Measure:{args.warmup_steps}/{args.measure_steps}")
+        print(f"=== π₀.₅ Training Benchmark ===", flush=True)
+        print(f"Config:        pi05_libero (synthetic data)", flush=True)
+        print(f"World size:    {world_size}", flush=True)
+        print(f"Per-GPU batch: {args.batch_size}", flush=True)
+        print(f"Global batch:  {args.batch_size * world_size}", flush=True)
+        print(f"Warmup/Measure:{args.warmup_steps}/{args.measure_steps}", flush=True)
 
-    openpi_train = _import_openpi_train()
-    meter = ThroughputMeter(args.warmup_steps, args.measure_steps)
-    total_steps = args.warmup_steps + args.measure_steps
-
-    # openpi's run() accepts a step_callback that is called after every step.
-    # We inject our meter there and raise StopIteration once we have enough data.
-    def _step_cb(step: int, _metrics: dict):
-        meter.step()
-        if meter.done:
-            raise StopIteration("benchmark complete")
+    # --- openpi imports -------------------------------------------------------
+    openpi_dir = Path(os.environ.get("OPENPI_DIR", Path.home() / "openpi"))
+    _setup_openpi(openpi_dir)
 
     try:
-        openpi_train.run(
-            config_name=args.config,
-            overrides=[
-                f"data.data_dir={args.data_dir}",
-                f"training.batch_size={args.batch_size}",
-                f"training.max_steps={total_steps}",
-                # FSDP is enabled by default in openpi's multi-GPU configs;
-                # set explicitly for clarity.
-                "training.fsdp=true",
-                "training.compile=true",
-                "training.grad_checkpoint=true",
-            ],
-            step_callback=_step_cb,
-        )
-    except StopIteration:
-        pass
+        from openpi.models_pytorch.pi0_pytorch import PI0Pytorch   # noqa: PLC0415
+        from openpi.models.pi0_config import Pi0Config              # noqa: PLC0415
+    except ImportError as e:
+        sys.exit(f"openpi not found. Run training/pi05/install.sh first.\n{e}")
 
-    # --- collect results ---
-    torch.cuda.synchronize()
-    peak_mem_gb = torch.cuda.max_memory_allocated(local_rank) / 1e9
+    # --- model ---------------------------------------------------------------
+    model_cfg = Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False)
+    model = PI0Pytorch(model_cfg).to(device=device, dtype=torch.bfloat16)
+    total_params = sum(p.numel() for p in model.parameters())
 
-    sps = meter.steps_per_sec() or 0.0
-    global_batch = args.batch_size * world_size
-    samples_per_sec = sps * global_batch
+    if is_dist:
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+
+    if is_main:
+        print(f"Model params:  {total_params/1e9:.1f}B", flush=True)
+
+    # --- optimizer -----------------------------------------------------------
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+    # --- warmup --------------------------------------------------------------
+    torch.cuda.reset_peak_memory_stats(device)
+    if is_main:
+        print("Warming up...", flush=True)
+
+    for _ in range(args.warmup_steps):
+        obs, actions = _make_synthetic_batch(args.batch_size, device)
+        loss = model(obs, actions).mean()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
+    if is_dist:
+        dist.barrier()
+    torch.cuda.synchronize(device)
+
+    # --- measure -------------------------------------------------------------
+    if is_main:
+        print("Measuring...", flush=True)
+
+    t0 = time.perf_counter()
+    for _ in range(args.measure_steps):
+        obs, actions = _make_synthetic_batch(args.batch_size, device)
+        loss = model(obs, actions).mean()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
+    if is_dist:
+        dist.barrier()
+    torch.cuda.synchronize(device)
+    elapsed = time.perf_counter() - t0
+
+    # --- metrics -------------------------------------------------------------
+    steps_per_sec  = args.measure_steps / elapsed
+    samples_per_sec = steps_per_sec * args.batch_size * world_size
+    peak_mem_gb    = torch.cuda.max_memory_allocated(device) / 1e9
 
     gpu_peak_flops, gpu_name = _detect_gpu_peak_flops()
     mfu = None
-    if args.flops_per_step and sps:
-        mfu = (args.flops_per_step * sps) / (gpu_peak_flops * world_size) * 100
-
-    results = {
-        "config": args.config,
-        "gpu_name": gpu_name,
-        "gpu_peak_flops_tflops": round(gpu_peak_flops / 1e12, 1),
-        "world_size": world_size,
-        "per_gpu_batch_size": args.batch_size,
-        "global_batch_size": global_batch,
-        "warmup_steps": args.warmup_steps,
-        "measure_steps": args.measure_steps,
-        "steps_per_sec": round(sps, 3),
-        "samples_per_sec": round(samples_per_sec, 1),
-        "peak_gpu_mem_gb": round(peak_mem_gb, 2),
-        "mfu_pct": round(mfu, 2) if mfu is not None else None,
-    }
+    if args.flops_per_step:
+        flops_per_sec = args.flops_per_step * steps_per_sec
+        mfu = flops_per_sec / (gpu_peak_flops * world_size) * 100
 
     if is_main:
-        print("\n=== Results ===")
-        print(f"  GPU:              {gpu_name} ({gpu_peak_flops/1e12:.0f} TFLOPS BF16 peak)")
-        print(f"  Steps/s:          {results['steps_per_sec']:.3f}")
-        print(f"  Samples/s:        {results['samples_per_sec']:.1f}")
-        print(f"  Peak GPU mem:     {results['peak_gpu_mem_gb']:.2f} GB")
-        if mfu:
-            print(f"  MFU:              {results['mfu_pct']:.1f}%")
+        print("\n=== Results ===", flush=True)
+        print(f"GPU:           {gpu_name}", flush=True)
+        print(f"Elapsed:       {elapsed:.1f}s over {args.measure_steps} steps", flush=True)
+        print(f"Throughput:    {steps_per_sec:.2f} steps/s  |  {samples_per_sec:.1f} samples/s", flush=True)
+        print(f"Peak GPU mem:  {peak_mem_gb:.1f} GB / rank", flush=True)
+        if mfu is not None:
+            print(f"MFU:           {mfu:.1f}%", flush=True)
 
+        result = {
+            "schema": ["pi05_train", "1node" if world_size <= 8 else "2node"],
+            "gpu": gpu_name,
+            "world_size": world_size,
+            "batch_size_per_gpu": args.batch_size,
+            "global_batch_size": args.batch_size * world_size,
+            "warmup_steps": args.warmup_steps,
+            "measure_steps": args.measure_steps,
+            "elapsed_s": elapsed,
+            "steps_per_sec": steps_per_sec,
+            "samples_per_sec": samples_per_sec,
+            "peak_mem_gb": peak_mem_gb,
+            "mfu_pct": mfu,
+        }
         if args.json_out:
             Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.json_out).write_text(json.dumps(results, indent=2))
-            print(f"\nResults written to {args.json_out}")
+            Path(args.json_out).write_text(json.dumps(result, indent=2))
+            print(f"\nResults written to {args.json_out}", flush=True)
+
+    if is_dist:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
