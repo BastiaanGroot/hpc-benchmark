@@ -52,6 +52,7 @@ docker run --rm \
   /workspace/hpl.sh \
     --dat /workspace/HPL.dat \
     --no-multinode \
+    --gpu-affinity 0:1:2:3:4:5:6:7 \
     --cpu-cores-per-rank 4 \
     --cpu-affinity broad
 
