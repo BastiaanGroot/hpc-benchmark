@@ -139,7 +139,9 @@ def main():
 
     # --- model ---------------------------------------------------------------
     model_cfg = Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False)
-    model = PI0Pytorch(model_cfg).to(device=device, dtype=torch.bfloat16)
+    # Match the real training script: move to device, leave mixed-precision as-is
+    # (PaliGemma/Gemma weights are bfloat16 via precision= arg; projection layers stay float32)
+    model = PI0Pytorch(model_cfg).to(device=device)
     total_params = sum(p.numel() for p in model.parameters())
 
     if is_dist:
