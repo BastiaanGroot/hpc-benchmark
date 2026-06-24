@@ -57,8 +57,8 @@ echo "Started:       $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # NCCL / InfiniBand tuning
 # Most of these are safe defaults for HDR/NDR IB. Override via env if needed.
 # ---------------------------------------------------------------------------
-# IB is enabled; set NCCL_IB_DISABLE=1 to fall back to TCP (for debugging only)
-export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-0}"
+# Force TCP/socket transport — IB driver present but no usable IB fabric on this cluster
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 
 # GPUDirect RDMA: level 5 = use GDR when possible (requires nv_peer_mem / gdrcopy)
 export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-5}"
