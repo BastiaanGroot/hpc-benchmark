@@ -25,6 +25,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+# cuDNN SDPA frontend may lack execution plans on very new GPUs (e.g. B300 sm_103);
+# fall back to math/flash-attn paths which work via CUDA kernels.
+torch.backends.cuda.enable_cudnn_sdp(False)
+
 # ---------------------------------------------------------------------------
 # GPU peak FLOPS table (BF16, dense)
 # ---------------------------------------------------------------------------
