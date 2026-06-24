@@ -41,19 +41,28 @@ echo "Started:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Pull image if not already cached
 docker pull "${NGC_IMAGE}"
 
-# Mount HPL.dat into the container's default /workspace (don't override --workdir
-# so that hpl.sh remains on PATH via the container's nvidia_entrypoint.sh).
+# Run HPL via mpirun inside the container.
+#
+# Key notes for NVIDIA HPC-Benchmarks 26.02 on Blackwell (sm_103) with Docker:
+#
+# 1. hpl.sh must be invoked via mpirun — it does NOT self-launch MPI; it expects
+#    to be running as an MPI rank (detects rank via PMI/MPI env vars).
+#
+# 2. NVSHMEM version: xhpl links against the workspace libnvshmem_host.so.3.5.19.
+#    Overriding NVSHMEM_PATH to the CUDA-toolkit NVSHMEM (3.4.5) causes a device/
+#    host library version mismatch. Use the default workspace NVSHMEM (no override).
+#
+# 3. The nvidia_entrypoint prints "driverInitFileInfo result=11" at container start;
+#    these are non-fatal warnings from CUDA forward-compatibility probing.
+#
 docker run --rm \
   --gpus all \
   --ipc=host \
   --network=host \
-  --volume="${SCRATCH}/HPL.dat:/workspace/HPL.dat" \
+  --volume="${SCRATCH}/HPL.dat:/workspace/hpl-linux-x86_64/HPL.dat" \
+  --entrypoint=/usr/local/mpi/bin/mpirun \
   "${NGC_IMAGE}" \
-  /workspace/hpl.sh \
-    --dat /workspace/HPL.dat \
-    --no-multinode \
-    --gpu-affinity 0:1:2:3:4:5:6:7 \
-    --cpu-cores-per-rank 4 \
-    --cpu-affinity broad
+    -np 8 --allow-run-as-root --bind-to none \
+    bash -c 'source /workspace/hpc-benchmarks-gpu-env.sh && cd /workspace/hpl-linux-x86_64 && ./xhpl'
 
 echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
