@@ -49,7 +49,7 @@ docker run --rm \
   --network=host \
   --volume="${SCRATCH}/HPL.dat:/workspace/HPL.dat" \
   "${NGC_IMAGE}" \
-  hpl.sh \
+  /workspace/hpl.sh \
     --dat /workspace/HPL.dat \
     --cpu-cores-per-rank 4 \
     --cpu-affinity broad
