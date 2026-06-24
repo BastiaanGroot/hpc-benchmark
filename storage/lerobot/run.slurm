@@ -59,7 +59,6 @@ if [[ ! -d "${DATASET_DIR}" ]]; then
   echo "--- Downloading physical-intelligence/libero (~35 GB) ---"
   python3 "${BENCH_DIR}/storage/lerobot/download_dataset.py" \
     --dest "${STORAGE_PATH}/lerobot-datasets" \
-    --dataset "physical-intelligence/libero" \
     ${HF_TOKEN:+--hf-token "${HF_TOKEN}"}
 fi
 
