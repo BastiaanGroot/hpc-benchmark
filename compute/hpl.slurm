@@ -51,6 +51,7 @@ docker run --rm \
   "${NGC_IMAGE}" \
   /workspace/hpl.sh \
     --dat /workspace/HPL.dat \
+    --no-multinode \
     --cpu-cores-per-rank 4 \
     --cpu-affinity broad
 
