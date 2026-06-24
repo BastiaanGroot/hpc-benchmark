@@ -64,10 +64,11 @@ def _make_synthetic_batch(batch_size: int, device: torch.device):
     from openpi.models.model import Observation  # noqa: PLC0415
 
     B = batch_size
-    # Two cameras, 256×256 RGB, in [-1, 1] float32
+    # Three cameras matching openpi's IMAGE_KEYS, 256×256 RGB in [-1, 1] float32
     images = {
-        "image":       torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
-        "wrist_image": torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
+        "base_0_rgb":        torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
+        "left_wrist_0_rgb":  torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
+        "right_wrist_0_rgb": torch.rand(B, 3, 256, 256, dtype=torch.float32, device=device) * 2 - 1,
     }
     image_masks = {k: torch.ones(B, dtype=torch.bool, device=device) for k in images}
     state = torch.zeros(B, 32, dtype=torch.float32, device=device)

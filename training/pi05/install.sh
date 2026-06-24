@@ -25,6 +25,15 @@ pip install --upgrade pip uv
 # openpi uses uv for fast installs
 uv pip install -e "${INSTALL_DIR}[torch]"
 
+# Upgrade PyTorch to cu128 for Blackwell (B200/B300 sm_100/sm_103) support
+pip install --upgrade torch torchvision torchaudio \
+  --index-url https://download.pytorch.org/whl/cu128
+
+# Patch transformers with openpi's custom Gemma/SigLIP/PaliGemma modifications
+SITE_PKG=$(python3 -c "import sysconfig; print(sysconfig.get_path('purelib'))")
+cp -r "${INSTALL_DIR}/src/openpi/models_pytorch/transformers_replace/"* \
+  "${SITE_PKG}/transformers/"
+
 echo ""
 echo "openpi installed."
 echo "Activate:  source ${INSTALL_DIR}/.venv/bin/activate"
