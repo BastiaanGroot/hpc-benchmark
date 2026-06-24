@@ -41,15 +41,16 @@ echo "Started:    $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Pull image if not already cached
 docker pull "${NGC_IMAGE}"
 
+# Mount HPL.dat into the container's default /workspace (don't override --workdir
+# so that hpl.sh remains on PATH via the container's nvidia_entrypoint.sh).
 docker run --rm \
   --gpus all \
   --ipc=host \
   --network=host \
-  --volume="${SCRATCH}:/workspace/hpl" \
-  --workdir="/workspace/hpl" \
+  --volume="${SCRATCH}/HPL.dat:/workspace/HPL.dat" \
   "${NGC_IMAGE}" \
   hpl.sh \
-    --dat /workspace/hpl/HPL.dat \
+    --dat /workspace/HPL.dat \
     --cpu-cores-per-rank 4 \
     --cpu-affinity broad
 
