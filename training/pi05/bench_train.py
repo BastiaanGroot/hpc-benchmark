@@ -145,7 +145,9 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
 
     if is_dist:
-        model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+        model = nn.parallel.DistributedDataParallel(
+            model, device_ids=[local_rank], find_unused_parameters=True
+        )
 
     if is_main:
         print(f"Model params:  {total_params/1e9:.1f}B", flush=True)
