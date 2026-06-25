@@ -14,9 +14,6 @@
 #   1 MB  – 64 MB : Parquet shards (configurable with --shard-size when pushing datasets)
 #   64 MB – 1 GB  : video shards and checkpoint fragments
 #
-# If LIBERO dataset is present at $STORAGE_PATH/lerobot-datasets/physical-intelligence/libero,
-# a real-data read pass is also performed and appended to the JSON output.
-#
 # Usage:
 #   sbatch storage/sweep/run.slurm
 #
@@ -42,7 +39,7 @@ if ! command -v fio &>/dev/null; then
     fi
 fi
 RESULTS_DIR="${RESULTS_DIR:-results}"
-STORAGE_PATH="${STORAGE_PATH:-/tmp}"
+STORAGE_PATH="${STORAGE_PATH:-/mnt/data}"
 WORKERS="${WORKERS:-1}"
 PASSES="${PASSES:-3}"
 MAX_SIZE_MB="${MAX_SIZE_MB:-1024}"
