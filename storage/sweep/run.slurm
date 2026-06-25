@@ -28,6 +28,19 @@
 
 set -euo pipefail
 BENCH_DIR="${BENCH_DIR:-${HOME}/git/hpc-benchmark}"
+
+# Ensure fio is available
+if ! command -v fio &>/dev/null; then
+    echo "fio not found — attempting install..."
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y fio
+    elif command -v yum &>/dev/null; then
+        yum install -y fio
+    else
+        echo "ERROR: cannot install fio automatically. Install manually and retry." >&2
+        exit 1
+    fi
+fi
 RESULTS_DIR="${RESULTS_DIR:-results}"
 STORAGE_PATH="${STORAGE_PATH:-/tmp}"
 WORKERS="${WORKERS:-1}"

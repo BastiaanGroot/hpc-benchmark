@@ -28,6 +28,8 @@ of file sizes that appear in a typical LeRobot deployment:
 - Very low small-file (<1 MB) throughput → NFS/Lustre metadata overhead; avoid tiny shards and
   minimize the number of distinct files per episode.
 
+Requires `fio >= 3.0`. The Slurm script installs it automatically via `apt`/`yum` if not present.
+
 ```bash
 export STORAGE_PATH=/mnt/scratch    # filesystem to test
 sbatch storage/sweep/run.slurm
@@ -38,6 +40,9 @@ Optionally increase worker count to simulate PyTorch DataLoader concurrency:
 ```bash
 WORKERS=8 sbatch storage/sweep/run.slurm
 ```
+
+fio uses `--direct=1` (O_DIRECT) to bypass the OS page cache, so results reflect true
+storage throughput without needing root access or `drop_caches`.
 
 ---
 
