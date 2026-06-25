@@ -196,32 +196,6 @@ def main():
 
     print()
 
-    # Also read the LIBERO dataset if available
-    libero_result = None
-    libero_path = storage_path / "lerobot-datasets" / "physical-intelligence" / "libero"
-    if libero_path.exists():
-        print(f"  Measuring LIBERO dataset read ({libero_path})...")
-        parquet_files = sorted(libero_path.rglob("*.parquet"))[:20]
-        mp4_files = sorted(libero_path.rglob("*.mp4"))[:20]
-        total_bytes, total_time = 0, 0.0
-        for f in parquet_files + mp4_files:
-            size = f.stat().st_size
-            t = _read_file(f, size)
-            total_bytes += size
-            total_time += t
-        if total_time > 0:
-            libero_bw = total_bytes / total_time / 1e6
-            libero_result = {
-                "files_read": len(parquet_files) + len(mp4_files),
-                "total_mb": round(total_bytes / 1e6, 1),
-                "read_bw_mbs": round(libero_bw, 1),
-            }
-            print(f"  LIBERO read ({libero_result['files_read']} files, "
-                  f"{libero_result['total_mb']} MB): {libero_bw:.1f} MB/s")
-    else:
-        print(f"  LIBERO dataset not found at {libero_path} — skipping real-data read.")
-        print(f"  (Run training/pi05/install.sh or set STORAGE_PATH to include the dataset.)")
-
     print()
 
     output = {
@@ -230,8 +204,6 @@ def main():
         "passes": args.passes,
         "sweep": results,
     }
-    if libero_result:
-        output["libero_dataset_read"] = libero_result
 
     if args.output:
         with open(args.output, "w") as f:

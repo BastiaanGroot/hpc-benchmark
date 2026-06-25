@@ -22,9 +22,6 @@ of file sizes that appear in a typical LeRobot deployment:
 | 64 MB | Large Parquet shards / short MP4 episode chunks |
 | 256 MB – 1 GB | Long video shards, model checkpoint fragments |
 
-If the LIBERO dataset is present at `$STORAGE_PATH/lerobot-datasets/physical-intelligence/libero`,
-a real-data read pass (Parquet + MP4 files) is appended to the JSON output.
-
 **Interpreting the sweep:**
 - Throughput flat from 1 MB onwards → shard size barely matters; pick 50–100 MB for convenience.
 - Throughput rises steeply up to _X_ MB then plateaus → set `--shard-size` ≥ _X_.
