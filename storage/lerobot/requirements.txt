@@ -1,4 +1,0 @@
-pyarrow>=16.0
-av>=12.0
-numpy>=1.26
-tqdm>=4.66

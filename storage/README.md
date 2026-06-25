@@ -4,33 +4,43 @@ Two complementary benchmarks covering different perspectives.
 
 | Benchmark | What it measures | When to use |
 |-----------|-----------------|-------------|
-| `lerobot/` | Real LIBERO data read throughput (your actual training I/O) | Always — tells you if the filesystem can keep π₀.₅ fed |
+| `sweep/` | Sequential read/write throughput across block sizes 64 KB → 1 GB | Always — determines optimal LeRobot shard size and raw filesystem ceiling |
 | `mlperf/` | Synthetic ML workload (vendor-comparable, isolates FS from decode) | Vendor evaluation, procurement, isolating FS from decoding overhead |
 
 ---
 
-## 1. LIBERO I/O (`lerobot/`)
+## 1. File-size Sweep (`sweep/`)
 
-Uses [`physical-intelligence/libero`](https://huggingface.co/datasets/physical-intelligence/libero)
-— 35 GB, 1,693 episodes, dual camera, 256×256 @ 10 fps —
-the actual dataset used to fine-tune π₀.₅-LIBERO.
+Measures sequential read and write throughput at eight block sizes spanning the full range
+of file sizes that appear in a typical LeRobot deployment:
 
-Access pattern: random Parquet row-group reads (states/actions) + random-seek frame
-decode from MP4 shards, matching a π₀.₅ PyTorch DataLoader.
+| Block size | LeRobot equivalent |
+|------------|-------------------|
+| 64 KB | Episode metadata, Parquet row groups |
+| 256 KB – 1 MB | Small Parquet shards (fine-grained indexing) |
+| 4 MB – 16 MB | Default Parquet shard size (`--shard-size` when pushing) |
+| 64 MB | Large Parquet shards / short MP4 episode chunks |
+| 256 MB – 1 GB | Long video shards, model checkpoint fragments |
+
+If the LIBERO dataset is present at `$STORAGE_PATH/lerobot-datasets/physical-intelligence/libero`,
+a real-data read pass (Parquet + MP4 files) is appended to the JSON output.
+
+**Interpreting the sweep:**
+- Throughput flat from 1 MB onwards → shard size barely matters; pick 50–100 MB for convenience.
+- Throughput rises steeply up to _X_ MB then plateaus → set `--shard-size` ≥ _X_.
+- Very low small-file (<1 MB) throughput → NFS/Lustre metadata overhead; avoid tiny shards and
+  minimize the number of distinct files per episode.
 
 ```bash
-export STORAGE_PATH=/mnt/scratch   # any mounted filesystem
-export HF_TOKEN=hf_...
-
-sbatch storage/lerobot/run.slurm
+export STORAGE_PATH=/mnt/scratch    # filesystem to test
+sbatch storage/sweep/run.slurm
 ```
 
-On first run downloads LIBERO to `STORAGE_PATH/lerobot-datasets/`. The training
-benchmarks reuse the same data automatically.
+Optionally increase worker count to simulate PyTorch DataLoader concurrency:
 
-> **Cold-read note:** on nodes with ≥ 512 GB RAM the 35 GB dataset may warm into
-> page cache. Drop caches before running for a true cold-read measurement:
-> `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`
+```bash
+WORKERS=8 sbatch storage/sweep/run.slurm
+```
 
 ---
 
