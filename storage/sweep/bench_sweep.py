@@ -108,12 +108,9 @@ def run_fio_job(fio: str, tmp_dir: Path, bs: str, label: str,
         ]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             # direct I/O not supported on this filesystem (e.g. NFS with rsize mismatch)
-            # retry without --direct
-            cmd = [c for c in cmd if c not in ("--direct", "1")]
-            cmd = [c for c in cmd]
-            # remove "--direct" and its argument
+            # retry without --direct and its value
             filtered = []
             skip_next = False
             for c in cmd:
